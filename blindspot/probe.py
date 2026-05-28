@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import sys
-"""Python-проба: делят ли установленные статические линтеры слепые зоны?
+"""Python probe: do the installed static linters share blind spots?
 
-Строит корпус однозначных дефектов (по нескольким классам с жёстким ground
-truth), прогоняет на нём установленные линтеры (pylint / ruff / flake8),
-формирует матрицу промахов и считает корреляцию промахов ядром — по КАЖДОМУ
-классу отдельно (без пулинга). Дополнительно ранжирует избыточность: какую
-проверку можно убрать из стека, не теряя покрытия.
+Builds a corpus of unambiguous defects (across several classes with hard ground
+truth), runs the installed linters (pylint / ruff / flake8) against it,
+builds a miss matrix, and measures miss correlation with the core — per EACH
+class separately (no pooling). Additionally ranks redundancy: which check
+can be removed from the stack without losing coverage.
 """
 from . import corpus as _corpus
 from . import linters as _linters
@@ -14,17 +14,17 @@ from . import core as _core
 
 
 def build_miss_csv(out_path, linters=None, verbose=True):
-    """Прогнать все классы корпуса через линтеры, записать единый CSV. Вернёт (csv, used)."""
+    """Run all corpus classes through the linters, write a unified CSV. Returns (csv, used)."""
     used = linters or _linters.available_linters()
     if len(used) < 2:
         all_three = ["pylint", "ruff", "flake8"]
         miss = [n for n in all_three if not _linters.is_installed(n)]
         raise SystemExit(
-            "Для пробы нужно минимум 2 установленных линтера.\n"
-            f"Сейчас доступно: {used or 'ни одного'}.\n"
-            f"Установите недостающие В ТО ЖЕ окружение, где стоит blindspot:\n"
+            "At least 2 installed linters are required for the probe.\n"
+            f"Currently available: {used or 'none'}.\n"
+            f"Install the missing ones INTO THE SAME environment where blindspot is installed:\n"
             f"    {sys.executable} -m pip install {' '.join(miss or all_three)}\n"
-            "Проверьте: blindspot doctor")
+            "Check: blindspot doctor")
     classes = _corpus.build_all_classes()
     header = ["task_id", "defect_class", "ground_truth_defect"] + [f"miss_{m}" for m in used]
     lines = [",".join(header)]
@@ -41,24 +41,24 @@ def build_miss_csv(out_path, linters=None, verbose=True):
         f.write("\n".join(lines) + "\n")
     if verbose:
         cls_names = ", ".join(c for c, _ in classes)
-        print(f"Корпус: {n_total} сниппетов | классы: {cls_names} | линтеры: {', '.join(used)}")
+        print(f"Corpus: {n_total} snippets | classes: {cls_names} | linters: {', '.join(used)}")
     return out_path, used
 
 
 def _redundancy_ranking(report):
-    """По матрице корреляций промахов внутри каждого Z строит совет:
-    какой линтер избыточен (его промахи сильнее всего скоррелированы с другим,
-    т.е. он почти не добавляет нового покрытия). Жадно: помечаем кандидата на
-    удаление, если есть пара с corr-ДИ строго выше порога."""
+    """Given the miss-correlation matrix for each Z, builds a recommendation:
+    which linter is redundant (its misses are most strongly correlated with another,
+    i.e. it adds almost no new coverage). Greedy: marks a candidate for
+    removal if there is a pair with corr-CI strictly above the threshold."""
     print("\n" + "=" * 70)
-    print("СОВЕТ ПО СОСТАВУ СТЕКА (по каждому классу дефекта отдельно)")
+    print("STACK COMPOSITION ADVICE (per defect class separately)")
     print("=" * 70)
     for z, data in report.items():
         res = data["res"]
         n = data["n"]
         pairs = res["pairwise"]
-        print(f"\n-- класс {z} (n={n}) --")
-        # ищем дубликаты (нижняя граница ДИ высокая) и независимые
+        print(f"\n-- class {z} (n={n}) --")
+        # look for duplicates (lower CI bound is high) and independents
         dupes, weak, indep = [], [], []
         for pair, p in pairs.items():
             a, b = pair.split("|")
@@ -73,16 +73,16 @@ def _redundancy_ranking(report):
             else:
                 indep.append((a, b, corr))
         for a, b, c in dupes:
-            print(f"  • {a} ~ {b}: corr={c:+.2f} — ДУБЛИКАТЫ. "
-                  f"Один из двух можно убрать из CI без потери покрытия по {z}.")
+            print(f"  • {a} ~ {b}: corr={c:+.2f} — DUPLICATES. "
+                  f"One of the two can be removed from CI without losing coverage for {z}.")
         for a, b, c in weak:
-            print(f"  • {a} ~ {b}: corr={c:+.2f} — частичное перекрытие. "
-                  f"Дополняют друг друга лишь отчасти; держать оба оправдано слабо.")
+            print(f"  • {a} ~ {b}: corr={c:+.2f} — partial overlap. "
+                  f"They complement each other only partially; keeping both is barely justified.")
         for a, b, c in indep:
-            print(f"  • {a} ~ {b}: corr={c:+.2f} — независимы, дополняют друг друга. "
-                  f"Держать оба полезно.")
+            print(f"  • {a} ~ {b}: corr={c:+.2f} — independent, they complement each other. "
+                  f"Keeping both is useful.")
         if n < 10:
-            print(f"  ! n<10 по классу {z}: совет — ориентир, не вердикт.")
+            print(f"  ! n<10 for class {z}: advice is a guideline, not a verdict.")
 
 
 def run(out_csv="blindspot_misses.csv", n_boot=2000, seed=0, verbose=True):
@@ -90,5 +90,5 @@ def run(out_csv="blindspot_misses.csv", n_boot=2000, seed=0, verbose=True):
     report = _core.analyze_csv(csv_path, n_boot=n_boot, seed=seed, verbose=verbose)
     if verbose:
         _redundancy_ranking(report)
-        print(f"\nМатрица промахов сохранена: {csv_path}")
+        print(f"\nMiss matrix saved: {csv_path}")
     return report
