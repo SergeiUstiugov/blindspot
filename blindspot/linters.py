@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Обёртки для статических линтеров, параметризованные по классу дефекта.
+"""Wrappers for static linters, parameterized by defect class.
 
-Каждая обёртка возвращает на сниппете: 1 = ПРОПУСТИЛ дефект (false-negative),
-0 = поймал, None = линтер недоступен/упал. Линтеры сужены до правил конкретного
-класса дефекта, чтобы фоновый шум (docstring, длина строки) не считался «поймал».
+Each wrapper returns, for a snippet: 1 = MISSED the defect (false negative),
+0 = caught, None = the linter is unavailable/crashed. Linters are narrowed to
+the rules of the specific defect class so that background noise (docstrings,
+line length) is not counted as "caught."
 
-ВАЖНО (кроссплатформенность): линтеры запускаются как `python -m <модуль>`,
-а НЕ как голый бинарь. На Windows pylint/ruff/flake8 ставятся как .cmd/.exe,
-которые subprocess без shell не находит (FileNotFoundError). Запуск через
-sys.executable -m работает одинаково на Windows, Linux и macOS.
+IMPORTANT (cross-platform): linters are invoked as `python -m <module>`, NOT as
+a bare binary. On Windows pylint/ruff/flake8 are installed as .cmd/.exe, which
+subprocess without a shell does not find (FileNotFoundError). Running via
+sys.executable -m works the same on Windows, Linux, and macOS.
 
-Намеренно только СТАТИЧЕСКИЕ линтеры: проба не исполняет проверяемый код.
+Intentionally static linters only: the probe does not execute the code under check.
 
-Набор правил на класс (RULES[класс][линтер]):
-  unused_import   — неиспользуемые/мёртвые импорты
-  unused_variable — присвоенные, но не читаемые локальные переменные
+Rule sets by class (RULES[class][linter]):
+  unused_import   — unused / dead imports
+  unused_variable — assigned but unread local variables
 """
 import importlib.util
 import json
@@ -23,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 
-# правила по классам дефектов
+# rules per defect class
 RULES = {
     "unused_import": {
         "pylint": "unused-import,unused-wildcard-import,reimported",
@@ -37,12 +38,12 @@ RULES = {
     },
 }
 
-# имя линтера -> имя импортируемого модуля (для `python -m <модуль>`)
+# linter name -> importable module name (for `python -m <module>`)
 MODULE = {"pylint": "pylint", "ruff": "ruff", "flake8": "flake8"}
 
 
 def _run(args, timeout=120):
-    """Запуск `python -m <args>` кроссплатформенно."""
+    """Run `python -m <args>` cross-platform."""
     return subprocess.run([sys.executable, "-m", *args],
                           capture_output=True, text=True, timeout=timeout)
 
@@ -77,7 +78,7 @@ REGISTRY = {
 
 
 def is_installed(name):
-    """Установлен ли линтер — проверка по импортируемости модуля (кроссплатформенно)."""
+    """Is the linter installed — checked by module importability (cross-platform)."""
     mod = MODULE.get(name)
     if mod is None:
         return False
@@ -85,21 +86,21 @@ def is_installed(name):
 
 
 def available_linters():
-    """Список установленных линтеров (по импортируемости модуля, не по PATH)."""
+    """List of installed linters (by module importability, not by PATH)."""
     return [name for name in REGISTRY if is_installed(name)]
 
 
 def missing_install_hint(names):
-    """Дружелюбная подсказка по установке отсутствующих линтеров."""
+    """Friendly hint for installing missing linters."""
     miss = [n for n in names if not is_installed(n)]
     if not miss:
         return ""
-    return (f"Не установлены: {', '.join(miss)}. "
-            f"Поставьте их в ТЕКУЩЕЕ окружение: pip install {' '.join(miss)}")
+    return (f"Not installed: {', '.join(miss)}. "
+            f"Install them into the CURRENT environment: pip install {' '.join(miss)}")
 
 
 def run_on_source(name, source, defect_class="unused_import"):
-    """Прогнать линтер name на тексте source для класса defect_class. Вернёт 1/0/None."""
+    """Run linter `name` on `source` text for class `defect_class`. Returns 1/0/None."""
     rules = RULES.get(defect_class, {}).get(name)
     if rules is None:
         return None
