@@ -1,85 +1,85 @@
 # blindspot
 
-**Аудит независимости и избыточности проверок кода:** показывает, какие линтеры
-в вашем стеке дополняют друг друга, а какие делят общие слепые зоны (и потому
-избыточны). Меряет это данными — корреляцией промахов по каждому классу дефекта
-отдельно, — а не на глаз.
+**Auditing the independence and redundancy of code checks:** it shows which linters
+in your stack complement each other and which share common blind spots (and are
+therefore redundant). It measures this from data — the miss-correlation for each
+defect class separately — rather than by eye.
 
-Узкий, но честный инструмент: он автоматизирует ровно один уровень аудита
-(независимость проверок, T1). Внешнюю опору проверок (T2) и устойчивость
-итеративных циклов (T3) он НЕ меряет — они вынесены в методологический
-[CHECKLIST.md](CHECKLIST.md) как схемы, по которым вы строите свои проверки.
-Прочитайте раздел «Границы» до выводов.
+A narrow but honest tool: it automates exactly one level of the audit (check
+independence, T1). It does NOT measure the external grounding of checks (T2) or the
+stability of iterative loops (T3) — those are moved into the methodological
+[CHECKLIST.md](CHECKLIST.md) as schemes you use to build your own checks. Read the
+"Limits" section before drawing conclusions.
 
-## Зачем
+## Why
 
-Стек проверок (линтеры, типчекеры, тесты) снижает риск пропуска дефекта только если
-ошибки инструментов независимы. Если две проверки слепнут в одних и тех же местах,
-вторая почти не добавляет защиты — вы платите временем CI, а покрытие не растёт.
-`blindspot` отвечает, независимы ли они на самом деле, и прямо советует, что из
-стека можно убрать.
+A stack of checks (linters, type checkers, tests) reduces the risk of missing a
+defect only if the tools' errors are independent. If two checks go blind in the same
+places, the second adds almost no protection — you pay CI time while coverage does
+not grow. `blindspot` answers whether they are actually independent and directly
+advises what can be removed from the stack.
 
-Конкретный пример из коробки: на неиспользуемых импортах и переменных `ruff` и
-`flake8` дают корреляцию промахов **+1.00** — буквально дублируют друг друга (ruff
-переписывает правила pyflakes, на которых стоит flake8). Один из них в CI избыточен.
-`pylint` отличается от обоих (+0.26…+0.33) — частично дополняет. `blindspot
-probe-python` показывает это за секунды.
+A concrete out-of-the-box example: on unused imports and variables, `ruff` and
+`flake8` give a miss-correlation of **+1.00** — they literally duplicate each other
+(ruff reimplements the pyflakes rules that flake8 is built on). One of them is
+redundant in CI. `pylint` differs from both (+0.26…+0.33) — it partially complements
+them. `blindspot probe-python` shows this in seconds.
 
-## Установка
+## Installation
 
 ```bash
 pip install -e .
-# для Python-пробы — любые два из (ставьте в ТО ЖЕ окружение):
+# for the Python probe — any two of (install into the SAME environment):
 pip install pylint ruff flake8
 ```
 
-Линтеры запускаются через `python -m <линтер>`, поэтому работают одинаково на
-Windows, Linux и macOS — даже если бинарей нет в PATH. Главное, чтобы они стояли в
-том же окружении (venv), что и blindspot.
+Linters are invoked via `python -m <linter>`, so they work the same on Windows,
+Linux, and macOS — even if the binaries are not on PATH. The key requirement is that
+they are installed in the same environment (venv) as blindspot.
 
-## Быстрый старт
+## Quick start
 
 ```bash
-# 0. Проверить окружение (Python, кодировка, какие линтеры видны)
+# 0. Check the environment (Python, encoding, which linters are visible)
 blindspot doctor
 
-# 1. ОБЯЗАТЕЛЬНО: убедиться, что измеритель различает
-#    заведомо независимый и заведомо зависимый случай
+# 1. REQUIRED: confirm the meter distinguishes a known-independent
+#    case from a known-dependent one
 blindspot selftest
 
-# 2. Готовая проба: строит корпус дефектов (мёртвые импорты + неиспользуемые
-#    переменные), гоняет установленные линтеры, считает корреляцию промахов
-#    по каждому классу и советует, что в стеке избыточно
+# 2. Ready-made probe: builds a defect corpus (dead imports + unused
+#    variables), runs the installed linters, computes the miss-correlation
+#    for each class, and advises what is redundant in the stack
 blindspot probe-python
 
-# 3. Отчёт по своей матрице промахов (формат — ниже).
-#    report сам прогоняет selftest как ворота и откажется считать при провале.
+# 3. Report on your own miss matrix (format below).
+#    report runs selftest itself as a gate and refuses to compute if it fails.
 blindspot report misses.csv
 
-# 4. Оценить НОВОГО кандидата-валидатора против уже принятого набора:
-#    дополняет / дублирует / неопределённо (для сборки ансамбля под свой стек)
+# 4. Evaluate a NEW candidate validator against an already-accepted set:
+#    complements / duplicates / inconclusive (for building an ensemble for your stack)
 blindspot candidate misses.csv --candidate flake8 --accepted pylint,ruff
 ```
 
-> **Windows: если вывод в кракозябрах** — консоль не в UTF-8. Запустите
-> `set PYTHONUTF8=1` (или `chcp 65001`) перед командой. `blindspot doctor` это
-> диагностирует и подскажет.
+> **Windows: if the output is garbled** — the console is not in UTF-8. Run
+> `set PYTHONUTF8=1` (or `chcp 65001`) before the command. `blindspot doctor`
+> diagnoses this and tells you what to do.
 
-`article_listing.py` в корне — самодостаточный листинг (только numpy): метрика +
-selftest + воспроизведение арифметики, без установки пакета. Удобно приложить к
-тексту или прочитать алгоритм целиком.
+`article_listing.py` in the root is a self-contained listing (numpy only): the
+metric + selftest + arithmetic reproduction, without installing the package. Handy
+to attach to a paper or to read the whole algorithm at once.
 
-Пример вывода `probe-python` (pylint + ruff + flake8):
+Example `probe-python` output (pylint + ruff + flake8):
 
 ```
-  corr pylint|ruff:   +0.261 ДИ[+0.047,+0.468]
-  corr pylint|flake8: +0.261 ДИ[+0.056,+0.451]
-  corr ruff|flake8:   +1.000 ДИ[+1.000,+1.000]   <- ruff и flake8 дублируют друг друга
+  corr pylint|ruff:   +0.261 CI[+0.047,+0.468]
+  corr pylint|flake8: +0.261 CI[+0.056,+0.451]
+  corr ruff|flake8:   +1.000 CI[+1.000,+1.000]   <- ruff and flake8 duplicate each other
 ```
 
-## Формат матрицы промахов (для `report`)
+## Miss matrix format (for `report`)
 
-CSV, по строке на (объект, дефект):
+CSV, one row per (item, defect):
 
 ```
 task_id,defect_class,ground_truth_defect,miss_pylint,miss_ruff
@@ -87,126 +87,154 @@ T01,unused_import,1,1,0
 T02,unused_import,1,0,0
 ```
 
-- `defect_class` — класс дефекта Z; считается **отдельно по каждому классу**;
-- `ground_truth_defect` in {0,1} — есть ли в объекте настоящий дефект (берутся только строки `=1`);
-- `miss_<инструмент>` in {0,1} — **1 = инструмент ПРОПУСТИЛ** настоящий дефект (false-negative);
-- пустое поле = инструмент недоступен на этой строке (метод исключается из анализа).
+- `defect_class` — the defect class Z; computed **separately for each class**;
+- `ground_truth_defect` in {0,1} — whether the item actually has a defect (only `=1` rows are used);
+- `miss_<tool>` in {0,1} — **1 = the tool MISSED** a real defect (false negative);
+- empty field = the tool is unavailable on that row (the method is excluded from the analysis).
 
-## Какой код можно аудировать
+## What code can be audited
 
-Короткий ответ: **анализируемый код — на любом языке**. Важно различать три разных «кода», для каждого ответ свой.
+Short answer: **the analyzed code can be in any language.** It helps to distinguish
+three different "codes," each with its own answer.
 
-**1. Ядро `blindspot` — Python (numpy).** Сам инструмент написан на Python 3.9+. Переписывать его на другой язык незачем: ядро крошечное (φ-корреляция, joint/product, bootstrap — десятки строк), порт ничего не даёт.
+**1. The `blindspot` core — Python (numpy).** The tool itself is written in
+Python 3.9+. There is no reason to port it to another language: the core is tiny
+(phi-correlation, joint/product, bootstrap — tens of lines), and a port gains
+nothing.
 
-**2. Анализируемый код — любой язык.** `blindspot` не парсит исходники сам — он работает с **матрицей промахов** (CSV выше: пропустил/поймал). Откуда взялась матрица, ему всё равно. Поэтому аудировать можно проверки для чего угодно: JavaScript/TypeScript (ESLint, tsc), Go (golangci-lint, go vet), Rust (clippy), Java (SpotBugs, PMD) — лишь бы вы прогнали инструменты на корпусе и получили «поймал/пропустил». Готовая проба `probe-python` из коробки покрывает только Python-линтеры (pylint / ruff / flake8) — это единственная часть, привязанная к языку. Для другого стека матрицу строите вы.
+**2. The analyzed code — any language.** `blindspot` does not parse sources itself —
+it works with a **miss matrix** (the CSV above: missed/caught). Where the matrix
+came from is irrelevant to it. So you can audit checks for anything:
+JavaScript/TypeScript (ESLint, tsc), Go (golangci-lint, go vet), Rust (clippy), Java
+(SpotBugs, PMD) — as long as you run the tools on a corpus and obtain "caught/missed."
+The ready-made `probe-python` covers only Python linters (pylint / ruff / flake8)
+out of the box — that is the only language-specific part. For another stack you build
+the matrix yourself.
 
-**3. Обвязка под ваш стек — на языке вашего стека.** Адаптеры (запускают ваш линтер, возвращают 1/0/None) и генератор корпуса логично писать на языке проверяемого кода: для JS/TS — Node.js, для Go — Go. Единственное жёсткое требование — выход должен быть CSV нужного формата. Промпт 6 в `PROMPTS.md` как раз генерирует адаптеры ESLint и tsc на Node.js, пишущие совместимый CSV.
+**3. The harness for your stack — in your stack's language.** Adapters (run your
+linter, return 1/0/None) and the corpus generator are naturally written in the
+language of the analyzed code: for JS/TS — Node.js, for Go — Go. The only hard
+requirement is that the output must be CSV in the required format. Prompt 6 in
+[PROMPTS.md](PROMPTS.md) generates ESLint and tsc adapters in Node.js that write a
+compatible CSV.
 
-**Граница доверия проходит по CSV.** Ядро фиксировано и языконезависимо по входу; периметр (адаптеры) — на любом языке; между ними — простой текстовый контракт. Поэтому «перенос на другой стек» — это не переписывание инструмента, а написание адаптеров, которые кормят то же ядро.
+**The trust boundary runs along the CSV.** The core is fixed and language-agnostic
+at the input; the perimeter (the adapters) can be in any language; between them is a
+simple text contract. So "porting to another stack" is not rewriting the tool but
+writing adapters that feed the same core.
 
-Честный нюанс: вопрос не столько «поддерживается ли язык», сколько **есть ли в вашем стеке две действительно независимые проверки одного класса дефекта**. Если нет (одна проверка ловит всё, другая ничего), замер выродится — нулевая дисперсия, корреляция не определена. Это зависит не от языка, а от того, что у вас стоит в CI.
+An honest caveat: the question is less "is the language supported" and more **does
+your stack have two genuinely independent checks for one defect class.** If not (one
+check catches everything, the other nothing), the measurement degenerates — zero
+variance, the correlation is undefined. This depends not on the language but on what
+you have running in CI.
 
-## Метрики и вердикт
+## Metrics and verdict
 
-Внутри каждого класса Z считаются три согласованные метрики, все с bootstrap-ДИ и
-shuffle-контролем (перемешивание разрушает межинструментную связь, сохраняя
-маргиналы, — оценивает конечновыборочный пол):
+Within each class Z, three coherent metrics are computed, all with a bootstrap CI and
+a shuffle control (shuffling destroys the cross-tool relationship while preserving
+the marginals — it estimates the finite-sample floor):
 
-1. **phi-корреляция промахов** — попарно;
-2. **joint / product** — во сколько раз совместный промах чаще произведения маргиналов;
-3. **total correlation** (debiased) — информационный аналог «совместная картина ошибок раскладывается в произведение независимых».
+1. **phi miss-correlation** — pairwise;
+2. **joint / product** — how many times more often a joint miss occurs than the product of the marginals;
+3. **total correlation** (debiased) — the information-theoretic analogue of "the joint error picture factorizes into independent parts."
 
-Вердикт «независимы» — **только если все три ДИ одновременно** накрывают нейтральное
-значение (0, 1, 0). Иначе — зависимы или данных не хватило.
+A verdict of "independent" is reached **only if all three CIs simultaneously** cover
+the neutral value (0, 1, 0). Otherwise — dependent, or there was not enough data.
 
-## Три предохранителя — прочитайте до того, как доверять выводу
+## Three safeguards — read before trusting the verdict
 
-**1. Никогда не пулить разные классы дефекта.** Корреляция считается строго внутри
-одного `defect_class`. Если смешать классы, парадокс Симпсона даст ложную
-корреляцию: инструменты, каждый из которых ловит «свой» класс, при пулинге выглядят
-скоррелированными. Инструмент это соблюдает — не обходите, складывая классы вручную.
+**1. Never pool different defect classes.** The correlation is computed strictly
+within one `defect_class`. Mixing classes triggers Simpson's paradox and a spurious
+correlation: tools that each catch "their own" class look correlated when pooled. The
+tool enforces this — do not bypass it by merging classes by hand.
 
-**2. Малое n + широкий ДИ != «независимы».** При `n < 10` инструмент печатает
-предупреждение и помечает вердикт как неопределённый. Корреляция около нуля на
-крошечной выборке означает «не хватило мощности», а не «доказана независимость».
+**2. Small n + a wide CI != "independent".** When `n < 10` the tool prints a warning
+and marks the verdict inconclusive. A near-zero correlation on a tiny sample means
+"not enough power," not "independence proven."
 
-**3. Инструмент считает корреляцию того, что вы ему дали.** Если матрица промахов
-построена на загрязнённом ground truth, он честно посчитает **артефакт**. Реальный
-случай из разработки этого инструмента: первая версия тестового корпуса дала
-корреляцию -0.84 («сильная зависимость!»), но это был артефакт того, как дефекты
-были разложены по инструментам, а не их свойство. После перестройки корпуса
-«зависимость» исчезла. Драматичный **отрицательный** результат — такой же кандидат
-в артефакты, как и красивый положительный. Чистота разметки — на вас.
+**3. The tool correlates whatever you give it.** If the miss matrix is built on
+contaminated ground truth, it will honestly compute an **artifact**. A real case from
+developing this tool: the first version of the test corpus gave a correlation of
+-0.84 ("strong dependence!"), but that was an artifact of how defects were
+distributed across tools, not a property of them. After rebuilding the corpus the
+"dependence" vanished. A dramatic **negative** result is just as much a candidate for
+being an artifact as a beautiful positive one. The cleanliness of the labeling is on
+you.
 
-### Эти предохранители встроены в поведение, а не только в документацию
+### These safeguards are built into the behavior, not just the documentation
 
-- **selftest как ворота.** `blindspot report` сначала прогоняет selftest ядра и
-  **отказывается считать**, если он не пройден. Обойти можно только осознанно флагом
-  `--skip-selftest`. Доверять числам, пока инструмент не доказал, что отличает
-  независимый случай от зависимого, нельзя.
-- **INCONCLUSIVE по умолчанию.** При малом n или широком доверительном интервале
-  вердикт — «НЕОПРЕДЕЛЁННО — мало данных», а **не** «независимы». Маленькая выборка
-  не даёт объявить независимость; она перебивает зелёный свет.
-- **Предупреждение про состав корпуса.** Рядом с вердиктом печатается доля
-  совместных промахов в корпусе. φ управляется этой долей: набейте корпус «трудными»
-  кейсами, где оба инструмента слепнут вместе, — и φ вырастет. Поэтому переносим
-  только **качественный** вывод (независимы / перекрываются / дубликаты), а не само
-  число φ, если состав корпуса не отражает ваш реальный код.
+- **selftest as a gate.** `blindspot report` first runs the core selftest and
+  **refuses to compute** if it does not pass. You can override only deliberately with
+  the `--skip-selftest` flag. You should not trust the numbers until the tool has
+  proven it can tell an independent case from a dependent one.
+- **INCONCLUSIVE by default.** With small n or a wide confidence interval the verdict
+  is "INCONCLUSIVE — not enough data," **not** "independent." A small sample is not
+  allowed to declare independence; it overrides a green light.
+- **Corpus-composition warning.** Next to the verdict, the share of joint misses in
+  the corpus is printed. φ is driven by this share: pack the corpus with "hard" cases
+  where both tools go blind together and φ will rise. So transfer only the
+  **qualitative** conclusion (independent / overlapping / duplicate), not the φ value
+  itself, if the corpus composition does not reflect your real code.
 
-## Широкий аудит: чек-лист
+## Broader audit: a checklist
 
-`blindspot` автоматизирует **базовый уровень** аудита — независимость проверок (T1):
-корреляция промахов, поиск дубликатов и совет по составу стека. Это пункты Б1–Б3
-методологического [CHECKLIST.md](CHECKLIST.md), плюс Б4–Б5 как заготовка (свой класс
-дефекта вы добавляете по схеме в `linters.RULES` и `corpus.py`).
+`blindspot` automates the **base level** of the audit — check independence (T1):
+miss-correlation, finding duplicates, and advice on stack composition. These are
+items B1–B3 of the methodological [CHECKLIST.md](CHECKLIST.md), plus B4–B5 as a
+template (you add your own defect class following the scheme in `linters.RULES` and
+`corpus.py`).
 
-Более широкие уровни — внешняя опора проверки (T2/DPI) и устойчивость итеративного
-цикла (T3) — в чек-листе даны как проверяемые вопросы и схемы, а **не** как функции
-пакета. Их нельзя честно свести к одной метрике, поэтому притворяться кнопкой здесь
-было бы завышенным обещанием. Чек-лист показывает, как построить такие проверки
-поверх ядра под свой стек.
+The broader levels — the external grounding of a check (T2/DPI) and the stability of
+the iterative loop (T3) — are given in the checklist as verifiable questions and
+schemes, **not** as package functions. They cannot be honestly reduced to a single
+metric, so pretending to be a button here would be an overclaim. The checklist shows
+how to build such checks on top of the core for your stack.
 
-Чтобы собрать матрицу промахов под **свои** линтеры (а не только готовые pylint /
-ruff / flake8), в [PROMPTS.md](PROMPTS.md) есть набор промптов для LLM: они
-генерируют адаптеры, корпус и сборку CSV строго под контракт ядра, так что выход
-сразу читается `blindspot report`. LLM строит обвязку — но точкой измерения
-остаётся прогон на реальном корпусе, а не слово модели (это и есть T2/DPI на деле).
+To build a miss matrix for **your** linters (not just the ready-made pylint / ruff /
+flake8), [PROMPTS.md](PROMPTS.md) has a set of LLM prompts: they generate adapters,
+a corpus, and CSV assembly strictly under the core's contract, so the output is read
+by `blindspot report` right away. The LLM builds the harness — but the point of
+measurement remains the run on a real corpus, not the model's word (this is T2/DPI in
+practice).
 
-### Сборка ансамбля валидаторов под свой стек
+### Building a validator ensemble for your stack
 
-Отдельный цикл — для подбора, какие проверки вообще держать. Промпт 7 (разведчик) в
-`PROMPTS.md` просит LLM назвать **кандидатов** под ваш класс дефекта: имя, команда,
-флаг — но без оценки «какой лучше» (это решит замер, а не модель). Дальше каждый
-кандидат проверяется на ортогональность вашему набору:
+A separate loop — for choosing which checks to keep at all. Prompt 7 (the scout) in
+`PROMPTS.md` asks the LLM to name **candidates** for your defect class: name, command,
+flag — but without rating "which is best" (the measurement decides that, not the
+model). Then each candidate is tested for orthogonality to your set:
 
 ```bash
-blindspot candidate misses.csv --candidate <новый> --accepted <ваш набор через запятую>
+blindspot candidate misses.csv --candidate <new> --accepted <your set, comma-separated>
 ```
 
-Вердикт — **дополняет** (включить в стек), **дублирует** конкретного члена (отбросить),
-**неопределённо** (расширить корпус, не решать сейчас). Так ансамбль собирается из
-проверок, каждая из которых доказала прогоном, что добавляет покрытие. LLM подсказала,
-что бывает; решил — замер. Если кандидаты динамические (тесты, runtime-проверки) —
-они исполняют код, запускайте их только в песочнице (см. оговорку в PROMPTS.md).
+The verdict is **complements** (add to the stack), **duplicates** a specific member
+(drop it), or **inconclusive** (expand the corpus, do not decide now). This way the
+ensemble is assembled from checks each of which has proven by a run that it adds
+coverage. The LLM suggested what exists; the measurement decided. If the candidates
+are dynamic (tests, runtime checks) — they execute code, so run them only in a
+sandbox (see the caveat in PROMPTS.md).
 
-## Границы — чего инструмент НЕ делает
+## Limits — what the tool does NOT do
 
-- **Не** выносит суждений о надёжности системы в целом — только о корреляции промахов проверок по классам дефектов (T1-уровень). T2/T3 — в [CHECKLIST.md](CHECKLIST.md) как методология, не как функции.
-- **Не** строит ground truth за вас. Проба делает это для классов с однозначной разметкой (мёртвый импорт, неиспользуемая переменная); для своих классов матрицу промахов готовите вы.
-- **Не** исполняет ваш код. Проба использует только статические линтеры (pylint / ruff / flake8); инструменты, требующие запуска кода, в неё не входят по соображениям безопасности.
-- **Не** заменяет ни один из линтеров — он измеряет их пересечение, а не ищет дефекты.
+- It does **not** judge the reliability of the system as a whole — only the miss-correlation of checks by defect class (the T1 level). T2/T3 are in [CHECKLIST.md](CHECKLIST.md) as methodology, not as functions.
+- It does **not** build ground truth for you. The probe does this for classes with unambiguous labeling (dead import, unused variable); for your own classes you prepare the miss matrix.
+- It does **not** execute your code. The probe uses only static linters (pylint / ruff / flake8); tools that require running code are excluded for safety reasons.
+- It does **not** replace any linter — it measures their overlap, it does not find defects.
 
-## Статус
+## Status
 
-Измеритель откалиброван на синтетике (`blindspot selftest`: заведомо независимую
-пару называет независимой, заведомо зависимую — зависимой). Числа на реальных
-линтерах воспроизводимы (`probe-python`), но это **измерение на небольших корпусах**:
-доверительные интервалы широкие, величина зависимости зависит от состава корпуса.
-Рабочий инструмент с честно очерченной областью, а не доказательство общих утверждений.
+The meter is calibrated on synthetic data (`blindspot selftest`: it calls a
+known-independent pair independent and a known-dependent pair dependent). The numbers
+on real linters are reproducible (`probe-python`), but this is a **measurement on
+small corpora**: the confidence intervals are wide, and the magnitude of the
+dependence depends on the corpus composition. A working tool with an honestly drawn
+scope, not a proof of general claims.
 
-Извлечён из исследовательского проекта как самостоятельная утилита; никакой
-теоретической рамки для использования не требуется.
+Extracted from a research project as a standalone utility; no theoretical framework
+is required to use it.
 
-## Лицензия
+## License
 
-MIT — используйте свободно.
+MIT — use freely.

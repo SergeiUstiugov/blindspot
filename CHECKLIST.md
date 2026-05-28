@@ -1,96 +1,97 @@
-# Чек-лист аудита надёжности связки «генератор + проверки»
+# Checklist for auditing the reliability of a "generator + checks" pairing
 
-Этот документ — методология, а не код. Пакет `blindspot` автоматизирует только
-**базовый уровень** (T1: корреляция промахов по классу дефекта). Уровни Pro
-(T2 — внешняя опора, T3 — устойчивость цикла) остаются на стороне инженера:
-их нельзя честно свести к одной метрике, поэтому здесь они даны как проверяемые
-вопросы и схемы, по которым вы строите свои модули поверх ядра.
+This document is methodology, not code. The `blindspot` package automates only the
+**base level** (T1: miss-correlation by defect class). The Pro levels (T2 — external
+grounding, T3 — loop stability) remain on the engineer's side: they cannot be
+honestly reduced to a single metric, so here they are given as verifiable questions
+and schemes from which you build your own modules on top of the core.
 
-Маркировка: ✅ — автоматизировано в `blindspot`; 🔧 — собирается инженером по
-схеме ниже; 📐 — теоретический критерий, проверяется рассуждением/ручным анализом.
-
----
-
-## Базовый уровень — независимость проверок (T1)
-
-**Вопрос: ваши проверки действительно дополняют друг друга или делят слепые зоны?**
-
-- ✅ **Б1. Считать слепые зоны, а не число проверок.** Для каждого класса дефекта
-  отдельно постройте матрицу промахов и посчитайте корреляцию промахов пар.
-  `blindspot probe-python` делает это для unused-import и unused-variable;
-  `blindspot report misses.csv` — для вашей матрицы.
-
-- ✅ **Б2. Никогда не пулить классы дефектов.** Корреляция считается строго внутри
-  одного класса Z. Пулинг даёт ложную корреляцию (Симпсон). Инструмент это
-  соблюдает; если строите свой корпус — соблюдайте тоже.
-
-- ✅ **Б3. Помечать дубликаты и частичные перекрытия.** Пара с corr ≈ +1 —
-  дубликаты (один убрать из CI). Пара с corr около 0 и ДИ, накрывающим ноль —
-  независимы (держать оба полезно). `blindspot` выдаёт это как «совет по составу стека».
-
-- 🔧 **Б4. Свой класс дефекта.** Чтобы добавить класс (например, «затенение имени»,
-  «недостижимый код»), нужны: (а) корпус сниппетов с **однозначным** ground truth;
-  (б) обёртки линтеров, суженные до правил этого класса (см. `linters.RULES`).
-  Требование к корпусу: дефект должен быть заведомым по построению, а не «на глаз».
-
-- 🔧 **Б5. Контроль чистоты корпуса.** Включите варианты БЕЗ дефекта (как
-  `reassigned_*` в классе unused_variable) — если инструмент «ловит» дефект там,
-  где его нет, ваш ground truth загрязнён. Помните артефакт −0.84: грязная
-  разметка даёт ложную корреляцию в любую сторону.
+Legend: ✅ — automated in `blindspot`; 🔧 — assembled by the engineer following the
+scheme below; 📐 — a theoretical criterion, checked by reasoning/manual analysis.
 
 ---
 
-## Pro-уровень — внешняя опора проверки (T2 / DPI)
+## Base level — check independence (T1)
 
-**Вопрос: проверка смотрит на что-то внешнее по отношению к генератору — или только на его же выход?**
+**Question: do your checks actually complement each other, or do they share blind spots?**
 
-`blindspot` это НЕ измеряет: DPI — структурное свойство потока данных, не сводимое
-к корреляции промахов. Проверяется анализом архитектуры:
+- ✅ **B1. Count blind spots, not the number of checks.** For each defect class
+  separately, build a miss matrix and compute the pairwise miss-correlation.
+  `blindspot probe-python` does this for unused-import and unused-variable;
+  `blindspot report misses.csv` — for your matrix.
 
-- 📐 **P1. Откуда проверка берёт вход?** Если вход V ⊆ выход M (проверка читает
-  только то, что сгенерировал сам генератор — его «объяснение», «сертификат»,
-  «chain-of-thought»), то V структурно слепа к тому, что M отфильтровал. Это
-  прямое следствие неравенства об обработке данных.
+- ✅ **B2. Never pool defect classes.** The correlation is computed strictly within
+  one class Z. Pooling produces a spurious correlation (Simpson). The tool enforces
+  this; if you build your own corpus — enforce it too.
 
-- 🔧 **P2. Дать проверке внешний канал.** Реальные тесты, исходные данные,
-  независимый справочник, отдельная модель-судья на других данных. Практический
-  чек: можете ли вы назвать источник информации у проверки, которого нет у
-  генератора? Если нет — проверка декоративна.
+- ✅ **B3. Flag duplicates and partial overlaps.** A pair with corr ≈ +1 is a
+  duplicate (remove one from CI). A pair with corr near 0 and a CI covering zero is
+  independent (keeping both is useful). `blindspot` reports this as "stack composition
+  advice."
 
-- 🔧 **P3. Для LLM-пайплайнов:** grounding / RAG / выполнение в песочнице — это и
-  есть способы дать V внешнюю опору. Само-ревью моделью своего же ответа без
-  внешних данных T2 не удовлетворяет.
+- 🔧 **B4. Your own defect class.** To add a class (e.g. "name shadowing,"
+  "unreachable code") you need: (a) a corpus of snippets with **unambiguous** ground
+  truth; (b) linter wrappers narrowed to the rules of that class (see
+  `linters.RULES`). Corpus requirement: the defect must be certain by construction,
+  not "by eye."
 
----
-
-## Pro-уровень — устойчивость итеративного цикла (T3)
-
-**Вопрос: цикл «сгенерировал → проверил → исправил → снова» сходится или расходится?**
-
-`blindspot` это НЕ измеряет: нужен динамический прогон цикла, а не статический
-замер промахов. Схема для своего модуля:
-
-- 📐 **T-1. Есть ли внешний эталон в цикле?** Если исправления оцениваются только
-  по согласию системы с собой (нет внешнего критерия истинности), цикл склонен
-  расходиться — расти в само-согласованности, удаляясь от реальности.
-
-- 🔧 **T-2. Мониторить дрейф.** Прогоните цикл N итераций на тестовом наборе и
-  следите за метрикой качества против **внешнего** эталона (не против предыдущей
-  итерации). Рост согласованности при падении внешнего качества — сигнал
-  расходимости (формально ρ(Q) ≥ 1).
-
-- 🔧 **T-3. Ограничить самореференцию.** Не обучать/не настраивать систему только
-  на её собственных выводах без внешней разметки. Это самый частый способ
-  потерять устойчивость.
+- 🔧 **B5. Corpus cleanliness control.** Include variants WITHOUT a defect (like
+  `reassigned_*` in the unused_variable class) — if a tool "catches" a defect where
+  there is none, your ground truth is contaminated. Remember the -0.84 artifact: a
+  dirty labeling produces a spurious correlation in either direction.
 
 ---
 
-## Как пакет ложится на чек-лист
+## Pro level — external grounding of a check (T2 / DPI)
 
-`blindspot` покрывает пункты **Б1–Б3 полностью и Б4–Б5 как заготовку** (вы
-добавляете классы по схеме). Пункты P* и T* — методология: инструмент даёт ядро
-(метрику и корпусную дисциплину), поверх которого вы строите свои проверки под
-конкретный стек. Это сделано намеренно: автоматизировать честно можно только то,
-что сводится к измеримой величине с чистым ground truth; остальное требует
-инженерного суждения, и притворяться кнопкой здесь было бы тем самым завышенным
-обещанием, против которого вся методология.
+**Question: does the check look at something external to the generator — or only at the generator's own output?**
+
+`blindspot` does NOT measure this: DPI is a structural property of the data flow, not
+reducible to miss-correlation. It is checked by analyzing the architecture:
+
+- 📐 **P1. Where does the check get its input?** If input(V) ⊆ output(M) (the check
+  reads only what the generator itself produced — its "explanation," "certificate,"
+  "chain-of-thought"), then V is structurally blind to what M filtered out. This is a
+  direct consequence of the data-processing inequality.
+
+- 🔧 **P2. Give the check an external channel.** Real tests, source data, an
+  independent reference, a separate judge model on different data. A practical check:
+  can you name an information source the check has that the generator does not? If
+  not — the check is decorative.
+
+- 🔧 **P3. For LLM pipelines:** grounding / RAG / sandbox execution are the ways to
+  give V an external footing. A model self-reviewing its own answer without external
+  data does not satisfy T2.
+
+---
+
+## Pro level — stability of the iterative loop (T3)
+
+**Question: does the loop "generated → checked → fixed → again" converge or diverge?**
+
+`blindspot` does NOT measure this: it requires a dynamic run of the loop, not a static
+measurement of misses. A scheme for your own module:
+
+- 📐 **T-1. Is there an external reference in the loop?** If fixes are evaluated only
+  by the system's agreement with itself (no external criterion of truth), the loop
+  tends to diverge — growing in self-consistency while drifting from reality.
+
+- 🔧 **T-2. Monitor drift.** Run the loop for N iterations on a test set and track a
+  quality metric against an **external** reference (not against the previous
+  iteration). Rising consistency with falling external quality is a divergence signal
+  (formally ρ(Q) ≥ 1).
+
+- 🔧 **T-3. Limit self-reference.** Do not train/tune the system only on its own
+  outputs without external labeling. This is the most common way to lose stability.
+
+---
+
+## How the package maps onto the checklist
+
+`blindspot` covers items **B1–B3 fully and B4–B5 as a template** (you add classes
+following the scheme). Items P* and T* are methodology: the tool provides the core
+(the metric and corpus discipline) on top of which you build your own checks for a
+specific stack. This is intentional: you can honestly automate only what reduces to a
+measurable quantity with clean ground truth; the rest requires engineering judgment,
+and pretending to be a button here would be the very overclaim the whole methodology
+argues against.

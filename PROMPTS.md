@@ -1,234 +1,236 @@
-# Сборка обвязки под свой стек с помощью LLM
+# Building a harness for your stack with an LLM
 
-`blindspot` — это ядро измерения: оно считает корреляцию промахов по матрице,
-которую вы ему дали. Чтобы получить такую матрицу для **своих** инструментов,
-нужна обвязка: адаптеры под ваши линтеры, корпус под ваш класс дефекта, сборка
-матрицы. Эту обвязку удобно сгенерировать с помощью LLM (Perplexity, Claude и т.п.).
+`blindspot` is the measurement core: it computes the miss-correlation over a matrix
+you give it. To obtain such a matrix for **your** tools you need a harness: adapters
+for your linters, a corpus for your defect class, and matrix assembly. This harness
+is convenient to generate with an LLM (Perplexity, Claude, etc.).
 
-**Как это замыкает цикл честно.** LLM генерирует *код и данные*, но точкой
-измерения и решения остаётся `blindspot` — он смотрит на **фактические промахи
-линтеров на корпусе**, а не на слово модели. Это прямое следствие T2/DPI из статьи:
-проверка опирается на внешние данные (результаты запусков + ground truth), а не на
-объяснение генератора. LLM здесь строит обвязку, но не подменяет собой измерение.
+**How this closes the loop honestly.** The LLM generates *code and data*, but the
+point of measurement and decision remains `blindspot` — it looks at the **actual
+linter misses on the corpus**, not at the model's word. This is a direct consequence
+of T2/DPI from the paper: the check relies on external data (run results + ground
+truth), not on the generator's explanation. Here the LLM builds the harness but does
+not substitute itself for the measurement.
 
-> **Важно для стыковки.** Промпты ниже уже зафиксировали контракт ядра. Не меняйте
-> в них формат возврата (`1=пропустил, 0=поймал, None=недоступен`) и формат CSV —
-> иначе сгенерированный код не состыкуется с `blindspot report`. Контракт повторён
-> в каждом промпте намеренно. Все шесть промптов проверены: обвязка, собранная по
-> ним, читается `blindspot report` без правок.
+> **Important for compatibility.** The prompts below already fix the core's contract.
+> Do not change the return format (`1=missed, 0=caught, None=unavailable`) or the CSV
+> format in them — otherwise the generated code will not connect to
+> `blindspot report`. The contract is repeated in every prompt on purpose. All six
+> prompts are verified: a harness assembled from them is read by `blindspot report`
+> without edits.
 
 ---
 
-## Контракт ядра (то, подо что генерируем)
+## The core contract (what we generate against)
 
-Матрица промахов — CSV ровно такого вида (его читает `blindspot report`):
+The miss matrix is a CSV of exactly this form (read by `blindspot report`):
 
 ```
-task_id,defect_class,ground_truth_defect,miss_<инструмент1>,miss_<инструмент2>
+task_id,defect_class,ground_truth_defect,miss_<tool1>,miss_<tool2>
 T01,unused_variable,1,1,0
 T02,unused_variable,1,0,0
 T03,unused_variable,0,,
 ```
 
-- `ground_truth_defect` ∈ {0,1} — есть ли в кейсе настоящий дефект (анализируются только строки `=1`);
-- `miss_<инструмент>` ∈ {0,1} — **1 = инструмент ПРОПУСТИЛ дефект** (false-negative), 0 = поймал;
-- пустое поле — инструмент недоступен/неприменим к строке.
+- `ground_truth_defect` ∈ {0,1} — whether the case actually has a defect (only `=1` rows are analyzed);
+- `miss_<tool>` ∈ {0,1} — **1 = the tool MISSED the defect** (false negative), 0 = caught;
+- empty field — the tool is unavailable/inapplicable to the row.
 
-Адаптер инструмента возвращает **`1` (пропустил) / `0` (поймал) / `None` (недоступен)**.
-Ground truth держится **отдельно** (в данных корпуса), а не маркером внутри кода —
-маркер в коде подсказывал бы инструментам и загрязнял замер.
+A tool adapter returns **`1` (missed) / `0` (caught) / `None` (unavailable)**.
+Ground truth is kept **separately** (in the corpus data), not as a marker inside the
+code — a marker in the code would tip off the tools and contaminate the measurement.
 
 ---
 
-## Промпт 1 — адаптер под свой линтер
+## Prompt 1 — adapter for your linter
 
 ```
-У меня есть статический инструмент проверки Python-кода.
-  Проверка: [что ищет, например «неиспользуемые переменные»]
-  Запуск:  my_linter --check {path}
+I have a static analysis tool for Python code.
+  Check: [what it looks for, e.g. "unused variables"]
+  Invocation: my_linter --check {path}
 
-Напиши Python-функцию-адаптер:
+Write a Python adapter function:
 
   def run_my_linter(path: str) -> int | None:
       ...
 
-Контракт возврата СТРОГО такой (не меняй — это формат внешнего ядра):
-  1    — инструмент ПРОПУСТИЛ дефект (нет предупреждения там, где дефект есть)
-  0    — инструмент поймал дефект (выдал релевантное предупреждение)
-  None — инструмент недоступен/неприменим (например, упал с ошибкой парсинга)
+The return contract is STRICTLY as follows (do not change it — it is the external core's format):
+  1    — the tool MISSED the defect (no warning where a defect exists)
+  0    — the tool caught the defect (emitted a relevant warning)
+  None — the tool is unavailable/inapplicable (e.g. crashed with a parse error)
 
-Требования:
-  - запуск через subprocess, корректная обработка ненулевого exit code;
-  - сужение вывода до правил ИМЕННО этого класса дефекта (флагами линтера),
-    чтобы фоновый шум — docstring, длина строки — НЕ засчитывался как «поймал»;
-  - без внешних зависимостей, только стандартная библиотека.
+Requirements:
+  - run via subprocess, handle a nonzero exit code correctly;
+  - narrow the output to the rules of EXACTLY this defect class (via linter flags),
+    so that background noise — docstrings, line length — is NOT counted as "caught";
+  - no external dependencies, standard library only.
 
-Верни только код функции.
+Return only the function code.
 ```
 
-## Промпт 2 — генератор корпуса под свой класс дефекта
+## Prompt 2 — corpus generator for your defect class
 
 ```
-Собери мини-корпус Python-сниппетов для аудита ансамбля линтеров.
-Класс дефекта: [например «необработанное исключение»]
+Build a mini-corpus of Python snippets to audit an ensemble of linters.
+Defect class: [e.g. "unhandled exception"]
 
-Требования к ground truth (критично — от этого зависит честность замера):
-  - дефект должен быть ОДНОЗНАЧНЫМ ПО ПОСТРОЕНИЮ, а не «на глаз»;
-  - включи и положительные (дефект есть), и контрольные отрицательные
-    (синтаксически похожие, но дефекта НЕТ) — они ловят загрязнение разметки;
-  - разнообразие контекстов: в функции, в методе класса, в ветке if/try,
-    под `if False`, под `TYPE_CHECKING` — чтобы появился разброс промахов.
+Ground-truth requirements (critical — the honesty of the measurement depends on this):
+  - the defect must be UNAMBIGUOUS BY CONSTRUCTION, not "by eye";
+  - include both positives (defect present) and control negatives
+    (syntactically similar but NO defect) — they catch labeling contamination;
+  - a variety of contexts: in a function, in a class method, in an if/try branch,
+    under `if False`, under `TYPE_CHECKING` — so a spread of misses appears.
 
-Нужен Python-скрипт, который возвращает словарь:
+I need a Python script that returns a dictionary:
   { task_id: (source_code: str, has_defect: bool) }
-где has_defect — известный по построению ground truth (True/False).
+where has_defect is the ground truth known by construction (True/False).
 
-НЕ используй маркеры внутри кода (никаких комментариев # DEFECT) — ground truth
-держи отдельно, в has_defect, чтобы он не подсказывал инструментам.
-Верни готовый скрипт.
+Do NOT use markers inside the code (no # DEFECT comments) — keep ground truth
+separate, in has_defect, so it does not tip off the tools.
+Return the finished script.
 ```
 
-## Промпт 3 — сборка матрицы промахов в CSV ядра
+## Prompt 3 — assembling the miss matrix into the core CSV
 
 ```
-У меня есть:
-  - словарь корпуса { task_id: (source: str, has_defect: bool) };
-  - список адаптеров { имя_инструмента: функция(path)->int|None }
-    (1=пропустил, 0=поймал, None=недоступен).
+I have:
+  - a corpus dictionary { task_id: (source: str, has_defect: bool) };
+  - a list of adapters { tool_name: function(path)->int|None }
+    (1=missed, 0=caught, None=unavailable).
 
-Напиши Python-скрипт, который:
-  1) для каждого кейса пишет source во временный .py-файл;
-  2) прогоняет каждый адаптер, собирает miss-значения;
-  3) пишет CSV СТРОГО такого формата (его читает внешнее ядро blindspot):
+Write a Python script that:
+  1) for each case writes source to a temporary .py file;
+  2) runs each adapter, collects the miss values;
+  3) writes a CSV STRICTLY in this format (read by the external blindspot core):
 
-     task_id,defect_class,ground_truth_defect,miss_<инстр1>,miss_<инстр2>,...
+     task_id,defect_class,ground_truth_defect,miss_<tool1>,miss_<tool2>,...
 
-     где ground_truth_defect = 1 если has_defect иначе 0;
-     miss_* = значение адаптера (пустая строка, если None);
-  4) удаляет временные файлы.
+     where ground_truth_defect = 1 if has_defect else 0;
+     miss_* = the adapter value (empty string if None);
+  4) deletes the temporary files.
 
-defect_class задаётся параметром. Только стандартная библиотека. Верни скрипт.
+defect_class is given as a parameter. Standard library only. Return the script.
 ```
 
-После прогона: `blindspot report misses.csv` посчитает φ, joint/product,
-total correlation и выдаст вердикт по каждому классу — это и есть точка измерения.
+After the run: `blindspot report misses.csv` computes φ, joint/product, and
+total correlation and gives a verdict per class — this is the point of measurement.
 
-## Промпт 4 — классификация пар (если хотите свой отчёт без blindspot)
-
-```
-У меня есть результаты парных метрик аудита проверок: для каждой пары
-инструментов известны phi (φ-корреляция промахов) с 95%-ДИ [phi_lo, phi_hi]
-и ratio (joint/product) с ДИ [ratio_lo, ratio_hi].
-
-Напиши Python-функцию classify_pair(phi, phi_lo, phi_hi, ratio_lo, ratio_hi) -> str,
-которая возвращает СТРОГО одно из:
-  "independent"     — ДИ phi накрывает 0 И ДИ ratio накрывает 1;
-  "duplicate"       — phi >= 0.9 и ratio_lo заметно > 1;
-  "weak_dependence" — иначе, если phi_lo > 0 или ratio_lo > 1;
-  "inconclusive"    — если выборка мала и ДИ слишком широкий (phi_hi - phi_lo > 0.6).
-
-Важно: "inconclusive" имеет приоритет — малое n и широкий ДИ это «не хватило
-данных», а НЕ «независимы». Только стандартная библиотека. Верни функцию.
-```
-
-## Промпт 5 — Markdown-отчёт для CI
+## Prompt 4 — pair classification (if you want your own report without blindspot)
 
 ```
-Нужен утилитарный скрипт. На вход — CSV с парными метриками:
+I have the results of pairwise check-audit metrics: for each pair of tools I know
+phi (φ miss-correlation) with a 95% CI [phi_lo, phi_hi] and ratio (joint/product)
+with a CI [ratio_lo, ratio_hi].
+
+Write a Python function classify_pair(phi, phi_lo, phi_hi, ratio_lo, ratio_hi) -> str
+that returns STRICTLY one of:
+  "independent"     — the phi CI covers 0 AND the ratio CI covers 1;
+  "duplicate"       — phi >= 0.9 and ratio_lo is clearly > 1;
+  "weak_dependence" — otherwise, if phi_lo > 0 or ratio_lo > 1;
+  "inconclusive"    — if the sample is small and the CI is too wide (phi_hi - phi_lo > 0.6).
+
+Important: "inconclusive" takes priority — small n and a wide CI mean "not enough
+data," NOT "independent." Standard library only. Return the function.
+```
+
+## Prompt 5 — a Markdown report for CI
+
+```
+I need a utility script. Input — a CSV of pairwise metrics:
   checker_a, checker_b, phi, phi_lo, phi_hi, ratio, relation
-(relation — из классификатора: independent / weak_dependence / duplicate / inconclusive).
+(relation — from the classifier: independent / weak_dependence / duplicate / inconclusive).
 
-Скрипт должен:
-  - вывести в stdout Markdown-таблицу: проверка A | проверка B | φ | ratio | relation;
-  - затем короткий summary:
-      * пары relation="duplicate" -> «один из инструментов можно убрать из CI
-        для этого класса дефекта»;
-      * пары relation="independent" -> «держать оба — дают реальное разнообразие»;
-      * пары relation="inconclusive" -> «данных мало, нужен корпус крупнее».
-  - вернуть ненулевой exit code, если есть хотя бы один "duplicate"
-    (чтобы шаг CI можно было сделать падающим).
+The script should:
+  - print to stdout a Markdown table: check A | check B | φ | ratio | relation;
+  - then a short summary:
+      * relation="duplicate" pairs -> "one of the tools can be removed from CI
+        for this defect class";
+      * relation="independent" pairs -> "keep both — they give real diversity";
+      * relation="inconclusive" pairs -> "too little data, a larger corpus is needed."
+  - return a nonzero exit code if there is at least one "duplicate"
+    (so the CI step can be made failing).
 
-Только стандартная библиотека. Верни скрипт.
+Standard library only. Return the script.
 ```
 
-## Промпт 6 — перенос подхода на другой стек (JS/TS)
+## Prompt 6 — porting the approach to another stack (JS/TS)
 
 ```
-Хочу перенести подход аудита ансамбля линтеров с Python на JavaScript/TypeScript
-(ESLint, tsc, кастомные проверки).
+I want to port the linter-ensemble audit approach from Python to JavaScript/TypeScript
+(ESLint, tsc, custom checks).
 
-Дай:
-  1) генератор корпуса для класса «неиспользуемая переменная»: словарь
-     { task_id: (source, has_defect) }, ground truth по построению, с
-     контрольными отрицательными примерами, БЕЗ маркеров в коде;
-  2) адаптеры для ESLint и tsc на Node.js — каждый возвращает 1/0/None
-     (1=пропустил дефект, 0=поймал, None=недоступен), сужение до правил класса;
-  3) скрипт, формирующий CSV формата
+Provide:
+  1) a corpus generator for the class "unused variable": a dictionary
+     { task_id: (source, has_defect) }, ground truth by construction, with
+     control negatives, WITHOUT markers in the code;
+  2) adapters for ESLint and tsc in Node.js — each returning 1/0/None
+     (1=missed the defect, 0=caught, None=unavailable), narrowed to the class rules;
+  3) a script that produces a CSV in the format
      task_id,defect_class,ground_truth_defect,miss_eslint,miss_tsc
-     (ground_truth_defect = 1/0, miss_* = 1/0/пусто),
-     пригодный для `blindspot report`.
+     (ground_truth_defect = 1/0, miss_* = 1/0/empty),
+     suitable for `blindspot report`.
 
-Верни код адаптеров и сборщика CSV.
+Return the adapter code and the CSV assembler.
 ```
 
-## Промпт 7 — разведчик кандидатов-валидаторов под класс дефекта
+## Prompt 7 — scouting candidate validators for a defect class
 
-Цель этого промпта особенная: LLM называет, какие проверки **бывают** под ваш класс
-дефекта (имя, команда, флаг), — а решает, ортогональны ли они вашему стеку, не LLM,
-а прогон через `blindspot candidate`. Поэтому промпт просит **только список
-кандидатов**, без оценки «какой лучше»: ранжирование по полезности было бы выводом
-по «объяснению модели», то есть нарушением T2.
+The purpose of this prompt is special: the LLM names which checks **exist** for your
+defect class (name, command, flag) — but whether they are orthogonal to your stack is
+decided not by the LLM but by a run through `blindspot candidate`. So the prompt asks
+for **only a list of candidates**, with no "which is best" rating: ranking by
+usefulness would be a conclusion drawn from the "model's explanation," i.e. a
+violation of T2.
 
 ```
-Я собираю ансамбль независимых проверок под класс дефекта: [например
-«неиспользуемый импорт» / «hardcoded secret» / «необработанное исключение»].
-Язык/стек: [Python / JS / Go / ...].
+I am assembling an ensemble of independent checks for the defect class: [e.g.
+"unused import" / "hardcoded secret" / "unhandled exception"].
+Language/stack: [Python / JS / Go / ...].
 
-Назови КАНДИДАТОВ — инструменты, которые в принципе ловят этот класс. Для каждого:
-  - имя;
-  - команда запуска на одном файле;
-  - правило/флаг, сужающий вывод именно до этого класса;
-  - тип: статический (читает код) или динамический (ИСПОЛНЯЕТ код — тесты,
-    runtime-ассерты, property-based).
+Name the CANDIDATES — tools that can in principle catch this class. For each:
+  - name;
+  - command to run on a single file;
+  - rule/flag that narrows output to exactly this class;
+  - type: static (reads the code) or dynamic (EXECUTES the code — tests,
+    runtime assertions, property-based).
 
-ВАЖНО, чего НЕ делать:
-  - не ранжируй кандидатов и не советуй «какой лучше добавить» — это решит
-    внешний замер на моём коде, а не ты;
-  - не утверждай, что они независимы между собой — это и есть то, что я измерю.
-Просто полный список вариантов с фактами запуска.
+IMPORTANT, what NOT to do:
+  - do not rank the candidates or advise "which is best to add" — that is decided
+    by the external measurement on my code, not by you;
+  - do not claim they are independent of each other — that is exactly what I will measure.
+Just a full list of options with the facts of how to run them.
 
-Формат вывода — таблица: имя | команда | флаг класса | тип (static/dynamic).
+Output format — a table: name | command | class flag | type (static/dynamic).
 ```
 
-> **Безопасность (динамические кандидаты).** Если в списке есть динамические
-> проверки — они **исполняют** код. Запускайте их только в песочнице/контейнере и
-> только на коде, которому доверяете: исполнение сгенерированного кода на рабочей
-> машине небезопасно. Статические кандидаты код не запускают. Готовая проба
-> `blindspot probe-python` намеренно работает только со статикой; динамику вы
-> подключаете сами, под свою ответственность.
+> **Safety (dynamic candidates).** If the list contains dynamic checks — they
+> **execute** code. Run them only in a sandbox/container and only on code you trust:
+> executing generated code on your working machine is unsafe. Static candidates do
+> not run code. The ready-made probe `blindspot probe-python` deliberately works with
+> static tools only; you connect dynamic ones yourself, at your own risk.
 
-### Цикл сборки ансамбля (как кандидат превращается в принятого)
+### The ensemble-assembly loop (how a candidate becomes accepted)
 
-1. Промпт 7 → список кандидатов под ваш класс дефекта.
-2. Выбираете одного, промпт 1 → адаптер под него (контракт 1/0/None).
-3. Промпт 3 → матрица промахов, включающая кандидата и уже принятый набор.
-4. `blindspot candidate misses.csv --candidate X --accepted A,B` → вердикт:
-   **дополняет** набор (включить), **дублирует** кого-то (отбросить),
-   **неопределённо** (расширить корпус, не решать сейчас).
-5. Если дополняет — кандидат становится частью набора; берёте следующего из п.1.
+1. Prompt 7 → a list of candidates for your defect class.
+2. You pick one, Prompt 1 → an adapter for it (the 1/0/None contract).
+3. Prompt 3 → a miss matrix including the candidate and the already-accepted set.
+4. `blindspot candidate misses.csv --candidate X --accepted A,B` → a verdict:
+   **complements** the set (include), **duplicates** someone (drop),
+   **inconclusive** (expand the corpus, do not decide now).
+5. If it complements — the candidate becomes part of the set; take the next one from step 1.
 
-Так ансамбль собирается из валидаторов, каждый из которых **доказал** прогоном, что
-добавляет покрытие, а не просто числится в CI. LLM подсказала, что бывает; решил —
-замер на вашем коде.
+This way the ensemble is assembled from validators each of which has **proven** by a
+run that it adds coverage, rather than just sitting in CI. The LLM suggested what
+exists; the measurement on your code decided.
 
 ---
 
-## Почему обвязку отдаём LLM, а измерение — нет
+## Why we hand the harness to the LLM but not the measurement
 
-LLM хорошо генерирует рутинную обвязку: адаптеры, корпус, парсинг. Но **доверять
-ей вывод о независимости нельзя** — это была бы проверка по «объяснению модели»,
-ровно то, что нарушает T2/DPI. Поэтому LLM строит вход, а вердикт выносит
-`blindspot` на фактических промахах. И не забудьте предохранитель из README: малое
-n и широкий ДИ — это «не хватило данных», а не «независимы»; грязный ground truth
-даёт артефакт в любую сторону (история −0.84). LLM-сгенерированный корпус особенно
-стоит проверить контрольными отрицательными примерами.
+The LLM is good at generating routine plumbing: adapters, corpus, parsing. But you
+**cannot trust it with the independence verdict** — that would be a check based on
+the "model's explanation," exactly what violates T2/DPI. So the LLM builds the input,
+and `blindspot` issues the verdict on actual misses. And do not forget the safeguard
+from the README: small n and a wide CI mean "not enough data," not "independent"; a
+dirty ground truth produces an artifact in either direction (the -0.84 story). An
+LLM-generated corpus is especially worth checking with control negatives.
