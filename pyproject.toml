@@ -15,7 +15,7 @@ dependencies = ["numpy>=1.21"]
 blindspot = "blindspot.cli:main"
 
 [project.optional-dependencies]
-# линтеры для probe-python ставятся пользователем по необходимости
+# linters for probe-python are installed by the user as needed
 python-probe = ["pylint", "ruff", "flake8"]
 
 [tool.setuptools]
