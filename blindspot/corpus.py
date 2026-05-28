@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Корпус однозначно мёртвых импортов в естественных синтаксических вариантах.
+"""Corpus of unambiguously dead imports in natural syntactic variants.
 
-Все сниппеты содержат импорт, который СЕМАНТИЧЕСКИ мёртв (не используется,
-удалён или под мёртвой ветвью) — ground truth известен по построению, не зависит
-от инструментов. Спорные случаи (голое имя-выражение, реальный __all__-реэкспорт)
-ИСКЛЮЧЕНЫ намеренно: чистота разметки важнее объёма.
+Every snippet contains an import that is SEMANTICALLY dead (unused, deleted, or
+under a dead branch) - the ground truth is known by construction and does not
+depend on the tools. Borderline cases (a bare name expression, a real __all__
+re-export) are deliberately EXCLUDED: cleanliness of labeling matters more than
+volume.
 """
 
 DEAD_MODULES = ["os", "sys", "json", "math", "re", "io", "csv", "time"]
-# несуществующие модули для try/except-варианта (его ловит pylint, пропускает ruff)
+# nonexistent modules for the try/except variant (pylint catches it, ruff misses)
 FAKE_MODULES = ["simplejson", "ujson", "cjson", "orjson", "rapidjson",
                 "hyperjson", "fastjson", "yajl"]
 
@@ -32,7 +33,7 @@ def _variants(mod):
 
 
 def build_corpus():
-    """Возвращает dict {task_id: source}. Все — класс дефекта 'unused_import'."""
+    """Returns dict {task_id: source}. All are defect class 'unused_import'."""
     corpus = {}
     for mod in DEAD_MODULES:
         corpus.update(_variants(mod))
@@ -45,10 +46,10 @@ def build_corpus():
 DEFECT_CLASS = "unused_import"
 
 
-# ───────────────────────── второй класс: unused_variable ──────────────────────
-# Локальная переменная, которой присвоено значение и которая нигде не читается.
-# Ground truth по построению. Включены варианты, где инструменты расходятся
-# (переменная цикла ловится pylint, но не F841 у ruff/flake8).
+# ============== second class: unused_variable ==============
+# A local variable that is assigned a value and is never read.
+# Ground truth by construction. Includes variants where the tools disagree
+# (a loop variable is caught by pylint but not by F841 in ruff/flake8).
 
 def _var_variants(name):
     return {
@@ -65,23 +66,23 @@ DEFECT_CLASS_VAR = "unused_variable"
 
 
 def build_corpus_var():
-    """Возвращает dict {task_id: source} для класса 'unused_variable'.
-    NB: вариант reassigned_* НЕ содержит дефекта (переменная читается) —
-    он отсеивается на этапе ground truth и служит контролем чистоты."""
+    """Returns dict {task_id: source} for the 'unused_variable' class.
+    NB: the reassigned_* variant does NOT contain a defect (the variable is read) -
+    it is filtered out at the ground-truth stage and serves as a cleanliness control."""
     corpus = {}
     for name in VAR_NAMES:
         corpus.update(_var_variants(name))
     return corpus
 
 
-# отметка, какие варианты реально содержат дефект (ground truth)
+# marker for which variants actually contain a defect (ground truth)
 def has_defect_var(task_id):
-    # reassigned_* — переменная в итоге читается (return name) → дефекта НЕТ
+    # reassigned_* - the variable ends up being read (return name) -> NO defect
     return not task_id.startswith("reassigned_")
 
 
 def build_all_classes():
-    """Возвращает список (defect_class, {task_id: (source, has_defect)})."""
+    """Returns a list (defect_class, {task_id: (source, has_defect)})."""
     imp = {tid: (src, True) for tid, src in build_corpus().items()}
     var = {tid: (src, has_defect_var(tid)) for tid, src in build_corpus_var().items()}
     return [(DEFECT_CLASS, imp), (DEFECT_CLASS_VAR, var)]
