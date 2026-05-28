@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "blindspot"
 version = "0.1.0"
-description = "Измеряет, делят ли валидаторы слепые зоны (корреляция промахов по классу дефекта)."
+description = "Measures whether validators share blind spots (miss-correlation per defect class)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
